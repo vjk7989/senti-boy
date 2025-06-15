@@ -3,28 +3,37 @@
 *Automatically synced with your [v0.dev](https://v0.dev) deployments*
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/vikiis-projects/v0-instagram-sentiment-analysis)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.dev-black?style=for-the-badge)](https://v0.dev/chat/projects/3gis0hXQgMW)
 
-## Overview
 
-This repository will stay in sync with your deployed chats on [v0.dev](https://v0.dev).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.dev](https://v0.dev).
+# 📊 Instagram Comment Sentiment Analysis
 
-## Deployment
+This project performs **sentiment analysis on Instagram comments** to determine whether user comments on a post are **positive, negative, or neutral**.
 
-Your project is live at:
+## 🚀 Features
 
-**[https://vercel.com/vikiis-projects/v0-instagram-sentiment-analysis](https://vercel.com/vikiis-projects/v0-instagram-sentiment-analysis)**
+- 📥 Scrapes comments from public Instagram posts.
+- 🧠 Uses a trained NLP model for sentiment classification.
+- 📊 Visualizes sentiment distribution using charts.
+- 📝 Exports sentiment data to CSV/JSON.
+- 🔒 Respects Instagram rate limits and handles exceptions gracefully.
 
-## Build your app
+## 🛠️ Tech Stack
 
-Continue building your app on:
+- **Python 3.x**
+- **Instaloader** – to scrape Instagram post comments
+- **NLTK / TextBlob / VaderSentiment / Transformers** – for sentiment analysis
+- **Matplotlib / Seaborn** – for data visualization
+- **Pandas** – for data handling
 
-**[https://v0.dev/chat/projects/3gis0hXQgMW](https://v0.dev/chat/projects/3gis0hXQgMW)**
+## 📦 Installation
 
-## How It Works
+1. Clone the repository:
 
-1. Create and modify your project using [v0.dev](https://v0.dev)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+```bash
+git clone https://github.com/vjk7989/senti-boy
+cd senti-boy
+
+
+
+
+
