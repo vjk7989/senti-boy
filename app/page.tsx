@@ -212,71 +212,240 @@ export default function AdvancedInstagramSentimentAnalyzer() {
     reader.readAsText(file)
   }
 
+  // Update the CSV handling functions to treat each row as a comment from a single post
   const processCsvAnalysis = async () => {
     if (csvData.length === 0) return
 
     setIsProcessingCsv(true)
-    const results = []
 
-    for (let i = 0; i < csvData.length; i++) {
-      const row = csvData[i]
-      const postText = row.post || row.caption || row.content || ""
-      const commentsText = row.comments || ""
+    // Check if we have a post content column or if we should treat this as comments-only
+    const hasPostColumn = csvData.some((row) => row.post || row.caption || row.content)
 
-      if (postText.trim()) {
-        try {
-          let analysis: PostWithCommentsAnalysis
+    if (hasPostColumn) {
+      // Original behavior - each row is a separate post
+      const results = []
 
-          if (commentsText.trim()) {
-            analysis = analyzer.analyzePostWithComments(postText, commentsText)
-          } else {
-            const postAnalysis = analyzer.analyze(postText)
-            analysis = {
-              post: postAnalysis,
-              comments: [],
-              commentStats: {
-                totalComments: 0,
-                averageSentiment: 0,
-                sentimentDistribution: { positive: 0, negative: 0, neutral: 0 },
-                engagementScore: 0,
-              },
-              overallAnalysis: {
-                combinedSentiment: postAnalysis,
-                postVsCommentsAlignment: 100,
-                controversyScore: 0,
-              },
+      for (let i = 0; i < csvData.length; i++) {
+        const row = csvData[i]
+        const postText = row.post || row.caption || row.content || ""
+        const commentsText = row.comments || ""
+
+        if (postText.trim()) {
+          try {
+            let analysis: PostWithCommentsAnalysis
+
+            if (commentsText.trim()) {
+              analysis = analyzer.analyzePostWithComments(postText, commentsText)
+            } else {
+              const postAnalysis = analyzer.analyze(postText)
+              analysis = {
+                post: postAnalysis,
+                comments: [],
+                commentStats: {
+                  totalComments: 0,
+                  averageSentiment: 0,
+                  sentimentDistribution: { positive: 0, negative: 0, neutral: 0 },
+                  engagementScore: 0,
+                },
+                overallAnalysis: {
+                  combinedSentiment: postAnalysis,
+                  postVsCommentsAlignment: 100,
+                  controversyScore: 0,
+                },
+              }
             }
-          }
 
-          results.push({
-            rowIndex: i + 1,
-            originalData: row,
-            analysis,
-            postText: postText.substring(0, 100) + (postText.length > 100 ? "..." : ""),
-            commentsCount: commentsText ? commentsText.split("\n").filter((l) => l.trim()).length : 0,
-          })
-        } catch (error) {
-          results.push({
-            rowIndex: i + 1,
-            originalData: row,
-            error: error instanceof Error ? error.message : "Analysis failed",
-            postText: postText.substring(0, 100) + (postText.length > 100 ? "..." : ""),
-            commentsCount: 0,
-          })
+            results.push({
+              rowIndex: i + 1,
+              originalData: row,
+              analysis,
+              postText: postText.substring(0, 100) + (postText.length > 100 ? "..." : ""),
+              commentsCount: commentsText ? commentsText.split("\n").filter((l) => l.trim()).length : 0,
+            })
+          } catch (error) {
+            results.push({
+              rowIndex: i + 1,
+              originalData: row,
+              error: error instanceof Error ? error.message : "Analysis failed",
+              postText: postText.substring(0, 100) + (postText.length > 100 ? "..." : ""),
+              commentsCount: 0,
+            })
+          }
         }
+
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
 
-      // Add delay to simulate processing
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      setCsvResults(results)
+    } else {
+      // New behavior - treat all rows as comments from a single post
+      try {
+        // Combine all comments into a single analysis
+        const allComments = csvData
+          .map((row, index) => {
+            const commentText = row.comment || row.text || row.content || ""
+            const author = row.author || row.username || row.user || ""
+
+            if (commentText.trim()) {
+              return author ? `${author}: ${commentText}` : commentText
+            }
+            return ""
+          })
+          .filter((comment) => comment.trim())
+          .join("\n")
+
+        if (allComments.trim()) {
+          // Create a dummy post or use provided post content
+          const postText = "Instagram Post Analysis" // Default post text
+          const analysis = analyzer.analyzePostWithComments(postText, allComments)
+
+          // Create individual comment results
+          const commentResults = csvData
+            .map((row, index) => {
+              const commentText = row.comment || row.text || row.content || ""
+              const author = row.author || row.username || row.user || ""
+
+              if (commentText.trim()) {
+                try {
+                  const commentAnalysis = analyzer.analyze(commentText)
+                  return {
+                    rowIndex: index + 1,
+                    originalData: row,
+                    commentText: commentText.substring(0, 100) + (commentText.length > 100 ? "..." : ""),
+                    author,
+                    sentiment: commentAnalysis.overall,
+                    confidence: commentAnalysis.confidence,
+                    compound: commentAnalysis.scores.compound,
+                    positive: commentAnalysis.scores.positive,
+                    negative: commentAnalysis.scores.negative,
+                    neutral: commentAnalysis.scores.neutral,
+                    engagement: commentAnalysis.engagement.likelyEngagement,
+                    virality: commentAnalysis.engagement.virality,
+                    emotions: commentAnalysis.emotions,
+                  }
+                } catch (error) {
+                  return {
+                    rowIndex: index + 1,
+                    originalData: row,
+                    error: error instanceof Error ? error.message : "Analysis failed",
+                    commentText: commentText.substring(0, 100) + (commentText.length > 100 ? "..." : ""),
+                    author,
+                  }
+                }
+              }
+              return null
+            })
+            .filter((result) => result !== null)
+
+          // Set both individual comment results and overall analysis
+          setCsvResults([
+            {
+              type: "single-post-comments",
+              overallAnalysis: analysis,
+              commentResults,
+              totalComments: commentResults.length,
+            },
+          ])
+        }
+      } catch (error) {
+        setCsvResults([
+          {
+            error: error instanceof Error ? error.message : "Analysis failed",
+            type: "single-post-comments",
+          },
+        ])
+      }
     }
 
-    setCsvResults(results)
     setIsProcessingCsv(false)
   }
 
   const downloadCsvResults = () => {
     if (csvResults.length === 0) return
 
+    // Check if this is single post with comments analysis
+    if (csvResults[0]?.type === "single-post-comments") {
+      const result = csvResults[0]
+
+      if (result.error) {
+        alert("Cannot export results due to analysis error")
+        return
+      }
+
+      const headers = [
+        "Row",
+        "Author",
+        "Comment Preview",
+        "Sentiment",
+        "Confidence",
+        "Compound Score",
+        "Positive %",
+        "Negative %",
+        "Neutral %",
+        "Engagement Level",
+        "Virality Score",
+        "Top Emotion",
+      ]
+
+      const csvContent = [
+        headers.join(","),
+        ...result.commentResults.map((comment) => {
+          if (comment.error) {
+            return [
+              comment.rowIndex,
+              comment.author || "",
+              `"${comment.commentText}"`,
+              "ERROR",
+              comment.error,
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+            ].join(",")
+          }
+
+          const topEmotion = Object.entries(comment.emotions).sort(([, a], [, b]) => b - a)[0]
+
+          return [
+            comment.rowIndex,
+            comment.author || "",
+            `"${comment.commentText}"`,
+            comment.sentiment,
+            comment.confidence.toFixed(1),
+            comment.compound.toFixed(3),
+            comment.positive.toFixed(1),
+            comment.negative.toFixed(1),
+            comment.neutral.toFixed(1),
+            comment.engagement,
+            comment.virality.toFixed(1),
+            `${topEmotion[0]}: ${topEmotion[1].toFixed(0)}%`,
+          ].join(",")
+        }),
+        "",
+        "OVERALL POST ANALYSIS",
+        `Total Comments: ${result.totalComments}`,
+        `Average Sentiment: ${result.overallAnalysis.commentStats.averageSentiment.toFixed(2)}`,
+        `Positive Comments: ${result.overallAnalysis.commentStats.sentimentDistribution.positive.toFixed(1)}%`,
+        `Negative Comments: ${result.overallAnalysis.commentStats.sentimentDistribution.negative.toFixed(1)}%`,
+        `Neutral Comments: ${result.overallAnalysis.commentStats.sentimentDistribution.neutral.toFixed(1)}%`,
+        `Engagement Score: ${result.overallAnalysis.commentStats.engagementScore.toFixed(1)}%`,
+        `Controversy Score: ${result.overallAnalysis.overallAnalysis.controversyScore.toFixed(1)}%`,
+      ].join("\n")
+
+      const blob = new Blob([csvContent], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "instagram_comments_sentiment_analysis.csv"
+      a.click()
+      URL.revokeObjectURL(url)
+      return
+    }
+
+    // Original multi-post export logic
     const headers = [
       "Row",
       "Post Preview",
@@ -610,8 +779,9 @@ Amazing work!`}
                     <Alert>
                       <FileText className="h-4 w-4" />
                       <AlertDescription>
-                        <strong>CSV Format:</strong> Your CSV should have columns named 'post' (or 'caption'/'content')
-                        for post text and optionally 'comments' for comment text. Each row will be analyzed separately.
+                        <strong>CSV Format:</strong> For multiple posts, use columns 'post'/'caption'/'content' and
+                        'comments'. For single post comments, use columns 'comment'/'text'/'content' for comment text
+                        and 'author'/'username'/'user' for usernames.
                       </AlertDescription>
                     </Alert>
 
@@ -715,9 +885,24 @@ Amazing work!`}
                         <div className="flex items-center justify-between">
                           <h4 className="font-medium">Analysis Results</h4>
                           <div className="flex gap-2">
-                            <Badge variant="outline">{csvResults.filter((r) => !r.error).length} successful</Badge>
-                            {csvResults.filter((r) => r.error).length > 0 && (
-                              <Badge variant="destructive">{csvResults.filter((r) => r.error).length} errors</Badge>
+                            {csvResults[0]?.type === "single-post-comments" ? (
+                              <>
+                                <Badge variant="outline">
+                                  {csvResults[0].commentResults?.filter((r) => !r.error).length || 0} comments analyzed
+                                </Badge>
+                                {csvResults[0].commentResults?.filter((r) => r.error).length > 0 && (
+                                  <Badge variant="destructive">
+                                    {csvResults[0].commentResults.filter((r) => r.error).length} errors
+                                  </Badge>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <Badge variant="outline">{csvResults.filter((r) => !r.error).length} successful</Badge>
+                                {csvResults.filter((r) => r.error).length > 0 && (
+                                  <Badge variant="destructive">{csvResults.filter((r) => r.error).length} errors</Badge>
+                                )}
+                              </>
                             )}
                             <Button variant="outline" size="sm" onClick={downloadCsvResults}>
                               <Download className="w-3 h-3 mr-1" />
@@ -726,124 +911,264 @@ Amazing work!`}
                           </div>
                         </div>
 
-                        <div className="border rounded-lg overflow-hidden">
-                          <div className="bg-gray-50 px-4 py-2 border-b">
-                            <div className="grid grid-cols-6 gap-2 text-xs font-medium text-gray-700">
-                              <div>Row</div>
-                              <div>Post Preview</div>
-                              <div>Sentiment</div>
-                              <div>Confidence</div>
-                              <div>Engagement</div>
-                              <div>Comments</div>
-                            </div>
-                          </div>
-                          <div className="max-h-80 overflow-y-auto">
-                            {csvResults.map((result, index) => (
-                              <div key={index} className="px-4 py-3 border-b last:border-b-0 hover:bg-gray-50">
-                                {result.error ? (
-                                  <div className="grid grid-cols-6 gap-2 text-sm">
-                                    <div className="text-gray-500">#{result.rowIndex}</div>
-                                    <div className="text-gray-800 truncate">{result.postText}</div>
-                                    <div className="text-red-600 font-medium">ERROR</div>
-                                    <div className="text-red-500 text-xs truncate">{result.error}</div>
-                                    <div>-</div>
-                                    <div>-</div>
-                                  </div>
-                                ) : (
-                                  <div className="grid grid-cols-6 gap-2 text-sm">
-                                    <div className="text-gray-500">#{result.rowIndex}</div>
-                                    <div className="text-gray-800 truncate">{result.postText}</div>
-                                    <div className={`font-medium ${getSentimentColor(result.analysis.post.overall)}`}>
-                                      {result.analysis.post.overall.toUpperCase()}
-                                    </div>
-                                    <div className="text-gray-600">{result.analysis.post.confidence.toFixed(0)}%</div>
-                                    <div
-                                      className={`text-xs ${getEngagementColor(result.analysis.post.engagement.likelyEngagement).split(" ")[0]}`}
-                                    >
-                                      {result.analysis.post.engagement.likelyEngagement}
-                                    </div>
-                                    <div className="text-gray-600">{result.commentsCount}</div>
-                                  </div>
-                                )}
+                        {csvResults[0]?.type === "single-post-comments" ? (
+                          // Single post comments analysis display
+                          <div className="space-y-4">
+                            {csvResults[0].error ? (
+                              <div className="text-red-600 p-4 border border-red-200 rounded-lg">
+                                Error: {csvResults[0].error}
                               </div>
-                            ))}
-                          </div>
-                        </div>
+                            ) : (
+                              <>
+                                {/* Overall Analysis Summary */}
+                                <Card>
+                                  <CardHeader>
+                                    <CardTitle>Overall Post Analysis</CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                      <div className="text-center p-3 bg-blue-50 rounded-lg">
+                                        <div className="text-2xl font-bold text-blue-600">
+                                          {csvResults[0].totalComments}
+                                        </div>
+                                        <div className="text-sm text-blue-700">Total Comments</div>
+                                      </div>
+                                      <div className="text-center p-3 bg-green-50 rounded-lg">
+                                        <div className="text-2xl font-bold text-green-600">
+                                          {csvResults[0].overallAnalysis.commentStats.sentimentDistribution.positive.toFixed(
+                                            0,
+                                          )}
+                                          %
+                                        </div>
+                                        <div className="text-sm text-green-700">Positive</div>
+                                      </div>
+                                      <div className="text-center p-3 bg-red-50 rounded-lg">
+                                        <div className="text-2xl font-bold text-red-600">
+                                          {csvResults[0].overallAnalysis.commentStats.sentimentDistribution.negative.toFixed(
+                                            0,
+                                          )}
+                                          %
+                                        </div>
+                                        <div className="text-sm text-red-700">Negative</div>
+                                      </div>
+                                      <div className="text-center p-3 bg-purple-50 rounded-lg">
+                                        <div className="text-2xl font-bold text-purple-600">
+                                          {csvResults[0].overallAnalysis.commentStats.engagementScore.toFixed(0)}%
+                                        </div>
+                                        <div className="text-sm text-purple-700">Engagement</div>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
 
-                        {/* Summary Stats */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="text-center p-3 bg-green-50 rounded-lg">
-                            <div className="text-2xl font-bold text-green-600">
-                              {csvResults.filter((r) => !r.error && r.analysis.post.overall === "positive").length}
-                            </div>
-                            <div className="text-sm text-green-700">Positive Posts</div>
+                                {/* Individual Comments */}
+                                <div className="border rounded-lg overflow-hidden">
+                                  <div className="bg-gray-50 px-4 py-2 border-b">
+                                    <div className="grid grid-cols-7 gap-2 text-xs font-medium text-gray-700">
+                                      <div>Row</div>
+                                      <div>Author</div>
+                                      <div>Comment Preview</div>
+                                      <div>Sentiment</div>
+                                      <div>Confidence</div>
+                                      <div>Score</div>
+                                      <div>Engagement</div>
+                                    </div>
+                                  </div>
+                                  <div className="max-h-80 overflow-y-auto">
+                                    {csvResults[0].commentResults.map((comment, index) => (
+                                      <div key={index} className="px-4 py-3 border-b last:border-b-0 hover:bg-gray-50">
+                                        {comment.error ? (
+                                          <div className="grid grid-cols-7 gap-2 text-sm">
+                                            <div className="text-gray-500">#{comment.rowIndex}</div>
+                                            <div className="text-gray-600">{comment.author || "-"}</div>
+                                            <div className="text-gray-800 truncate">{comment.commentText}</div>
+                                            <div className="text-red-600 font-medium">ERROR</div>
+                                            <div className="text-red-500 text-xs truncate">{comment.error}</div>
+                                            <div>-</div>
+                                            <div>-</div>
+                                          </div>
+                                        ) : (
+                                          <div className="grid grid-cols-7 gap-2 text-sm">
+                                            <div className="text-gray-500">#{comment.rowIndex}</div>
+                                            <div className="text-blue-600 font-medium truncate">
+                                              {comment.author || "-"}
+                                            </div>
+                                            <div className="text-gray-800 truncate">{comment.commentText}</div>
+                                            <div className={`font-medium ${getSentimentColor(comment.sentiment)}`}>
+                                              {comment.sentiment.toUpperCase()}
+                                            </div>
+                                            <div className="text-gray-600">{comment.confidence.toFixed(0)}%</div>
+                                            <div
+                                              className={`font-bold text-xs ${comment.compound > 0 ? "text-green-600" : comment.compound < 0 ? "text-red-600" : "text-gray-600"}`}
+                                            >
+                                              {comment.compound > 0 ? "+" : ""}
+                                              {comment.compound.toFixed(2)}
+                                            </div>
+                                            <div
+                                              className={`text-xs ${getEngagementColor(comment.engagement).split(" ")[0]}`}
+                                            >
+                                              {comment.engagement}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </>
+                            )}
                           </div>
-                          <div className="text-center p-3 bg-red-50 rounded-lg">
-                            <div className="text-2xl font-bold text-red-600">
-                              {csvResults.filter((r) => !r.error && r.analysis.post.overall === "negative").length}
+                        ) : (
+                          // Original multi-post display
+                          <div className="border rounded-lg overflow-hidden">
+                            <div className="bg-gray-50 px-4 py-2 border-b">
+                              <div className="grid grid-cols-6 gap-2 text-xs font-medium text-gray-700">
+                                <div>Row</div>
+                                <div>Post Preview</div>
+                                <div>Sentiment</div>
+                                <div>Confidence</div>
+                                <div>Engagement</div>
+                                <div>Comments</div>
+                              </div>
                             </div>
-                            <div className="text-sm text-red-700">Negative Posts</div>
-                          </div>
-                          <div className="text-center p-3 bg-gray-50 rounded-lg">
-                            <div className="text-2xl font-bold text-gray-600">
-                              {csvResults.filter((r) => !r.error && r.analysis.post.overall === "neutral").length}
+                            <div className="max-h-80 overflow-y-auto">
+                              {csvResults.map((result, index) => (
+                                <div key={index} className="px-4 py-3 border-b last:border-b-0 hover:bg-gray-50">
+                                  {result.error ? (
+                                    <div className="grid grid-cols-6 gap-2 text-sm">
+                                      <div className="text-gray-500">#{result.rowIndex}</div>
+                                      <div className="text-gray-800 truncate">{result.postText}</div>
+                                      <div className="text-red-600 font-medium">ERROR</div>
+                                      <div className="text-red-500 text-xs truncate">{result.error}</div>
+                                      <div>-</div>
+                                      <div>-</div>
+                                    </div>
+                                  ) : (
+                                    <div className="grid grid-cols-6 gap-2 text-sm">
+                                      <div className="text-gray-500">#{result.rowIndex}</div>
+                                      <div className="text-gray-800 truncate">{result.postText}</div>
+                                      <div className={`font-medium ${getSentimentColor(result.analysis.post.overall)}`}>
+                                        {result.analysis.post.overall.toUpperCase()}
+                                      </div>
+                                      <div className="text-gray-600">{result.analysis.post.confidence.toFixed(0)}%</div>
+                                      <div
+                                        className={`text-xs ${getEngagementColor(result.analysis.post.engagement.likelyEngagement).split(" ")[0]}`}
+                                      >
+                                        {result.analysis.post.engagement.likelyEngagement}
+                                      </div>
+                                      <div className="text-gray-600">{result.commentsCount}</div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                            <div className="text-sm text-gray-700">Neutral Posts</div>
                           </div>
-                          <div className="text-center p-3 bg-blue-50 rounded-lg">
-                            <div className="text-2xl font-bold text-blue-600">
-                              {csvResults.filter((r) => !r.error).length > 0
-                                ? (
-                                    csvResults
-                                      .filter((r) => !r.error)
-                                      .reduce((sum, r) => sum + r.analysis.post.confidence, 0) /
-                                    csvResults.filter((r) => !r.error).length
-                                  ).toFixed(0)
-                                : 0}
-                              %
+                        )}
+
+                        {/* Summary Stats - update for single post comments */}
+                        {csvResults[0]?.type === "single-post-comments" && !csvResults[0].error && (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="text-center p-3 bg-green-50 rounded-lg">
+                              <div className="text-2xl font-bold text-green-600">
+                                {
+                                  csvResults[0].commentResults.filter((r) => !r.error && r.sentiment === "positive")
+                                    .length
+                                }
+                              </div>
+                              <div className="text-sm text-green-700">Positive Comments</div>
                             </div>
-                            <div className="text-sm text-blue-700">Avg Confidence</div>
+                            <div className="text-center p-3 bg-red-50 rounded-lg">
+                              <div className="text-2xl font-bold text-red-600">
+                                {
+                                  csvResults[0].commentResults.filter((r) => !r.error && r.sentiment === "negative")
+                                    .length
+                                }
+                              </div>
+                              <div className="text-sm text-red-700">Negative Comments</div>
+                            </div>
+                            <div className="text-center p-3 bg-gray-50 rounded-lg">
+                              <div className="text-2xl font-bold text-gray-600">
+                                {
+                                  csvResults[0].commentResults.filter((r) => !r.error && r.sentiment === "neutral")
+                                    .length
+                                }
+                              </div>
+                              <div className="text-sm text-gray-700">Neutral Comments</div>
+                            </div>
+                            <div className="text-center p-3 bg-blue-50 rounded-lg">
+                              <div className="text-2xl font-bold text-blue-600">
+                                {csvResults[0].commentResults.filter((r) => !r.error).length > 0
+                                  ? (
+                                      csvResults[0].commentResults
+                                        .filter((r) => !r.error)
+                                        .reduce((sum, r) => sum + r.confidence, 0) /
+                                      csvResults[0].commentResults.filter((r) => !r.error).length
+                                    ).toFixed(0)
+                                  : 0}
+                                %
+                              </div>
+                              <div className="text-sm text-blue-700">Avg Confidence</div>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
 
                     {/* Sample CSV Template */}
                     <div className="space-y-2">
                       <h4 className="font-medium text-sm">Need a template?</h4>
-                      <div className="bg-gray-50 p-3 rounded text-xs font-mono">
-                        <div className="text-gray-600 mb-1">Sample CSV format:</div>
-                        <div>post,comments</div>
+                      <div className="bg-gray-50 p-3 rounded text-xs font-mono space-y-2">
                         <div>
-                          "Amazing sunset today! 🌅 #beautiful #nature","@user1: Gorgeous! Where is this?
-                          <br />
-                          @user2: Love the colors 😍<br />
-                          @user3: Makes me want to travel"
+                          <div className="text-gray-600 mb-1">Multiple posts format:</div>
+                          <div>post,comments</div>
+                          <div>"Amazing sunset! 🌅","@user1: Beautiful!\n@user2: Love it!"</div>
                         </div>
                         <div>
-                          "Just finished my workout 💪 #fitness","@trainer: Great job!
-                          <br />
-                          @friend: Inspiring as always"
+                          <div className="text-gray-600 mb-1">Single post comments format:</div>
+                          <div>author,comment</div>
+                          <div>user1,"This is amazing! Love the colors 😍"</div>
+                          <div>user2,"Where was this taken?"</div>
+                          <div>user3,"Gorgeous shot! 📸"</div>
                         </div>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const template =
-                            'post,comments\n"Amazing sunset today! 🌅 #beautiful #nature","@user1: Gorgeous! Where is this?\n@user2: Love the colors 😍\n@user3: Makes me want to travel"\n"Just finished my workout 💪 #fitness","@trainer: Great job!\n@friend: Inspiring as always"'
-                          const blob = new Blob([template], { type: "text/csv" })
-                          const url = URL.createObjectURL(blob)
-                          const a = document.createElement("a")
-                          a.href = url
-                          a.download = "instagram_analysis_template.csv"
-                          a.click()
-                          URL.revokeObjectURL(url)
-                        }}
-                      >
-                        <Download className="w-3 h-3 mr-1" />
-                        Download Template
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const template =
+                              'post,comments\n"Amazing sunset today! 🌅 #beautiful #nature","@user1: Gorgeous! Where is this?\n@user2: Love the colors 😍\n@user3: Makes me want to travel"\n"Just finished my workout 💪 #fitness","@trainer: Great job!\n@friend: Inspiring as always"'
+                            const blob = new Blob([template], { type: "text/csv" })
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement("a")
+                            a.href = url
+                            a.download = "instagram_posts_template.csv"
+                            a.click()
+                            URL.revokeObjectURL(url)
+                          }}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Posts Template
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const template =
+                              'author,comment\nuser1,"This is absolutely stunning! 😍 Where did you take this photo?"\nuser2,"Love the composition and colors! Great work 👏"\nuser3,"This makes me want to visit there right now!"\nuser4,"Beautiful shot! What camera did you use? 📸"\nuser5,"Incredible! Thanks for sharing this amazing view 🌅"'
+                            const blob = new Blob([template], { type: "text/csv" })
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement("a")
+                            a.href = url
+                            a.download = "instagram_comments_template.csv"
+                            a.click()
+                            URL.revokeObjectURL(url)
+                          }}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Comments Template
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

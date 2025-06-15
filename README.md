@@ -29,11 +29,6 @@ This project performs **sentiment analysis on Instagram comments** to determine 
 
 1. Clone the repository:
 
-```bash
+\`\`\`bash
 git clone https://github.com/vjk7989/senti-boy
 cd senti-boy
-
-
-
-
-
